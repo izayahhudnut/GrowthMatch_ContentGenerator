@@ -90,9 +90,65 @@ class SocialMediaPost(BaseModel):
         )
     )
    
+class BlogPost(BaseModel):
+    """SEO-optimized blog post generated from AI transcript and topic"""
+    title: str = Field(
+        ...,
+        max_length=120,
+        description=(
+            "CATCHY, SEO-OPTIMIZED TITLE (120 CHARACTER MAX). "
+            "Must include primary keyword naturally. "
+            "Use title case formatting."
+        )
+    )
+    
+    contentBody: str = Field(
+        ...,
+        min_length=2800,  # Targets ~700 words
+        max_length=4000,  # Targets ~1000 words
+        description=(
+            "STRUCTURED MARKDOWN CONTENT:\n"
+            "1. SEO SECTION (frontmatter):\n"
+            "   - Focus Keyword: [primary keyword]\n"
+            "   - Meta Title: [60 character max]\n"
+            "   - Meta Description: [160 character max]\n"
+            "   - URL: [slug suggestion]\n"
+            "2. CONTENT BODY:\n"
+            "   - H1 Headline\n"
+            "   - Minimum 3 H2 sections\n"
+            "   - Use H3s where appropriate\n"
+            "   - Include 1-2 lists\n"
+            "   - Conclusion with summary\n"
+            "FORMAT:\n"
+            "---\n"
+            "Focus Keyword: ...\n"
+            "Meta Title: ...\n"
+            "Meta Description: ...\n"
+            "URL: ...\n"
+            "---\n\n"
+            "# Main Headline\n\n"
+            "## Section 1\n\n"
+            "Content...\n\n"
+            "## Section 2\n\n"
+            "- List item\n- List item\n\n"
+            "### Subsection\n\n"
+            "Content...\n\n"
+            "## Conclusion\n\n"
+            "Final summary..."
+        )
+    )
+    
+    hashtags: List[str] = Field(
+        ...,
+        min_items=3,
+        max_items=5,
+        description=(
+            "3-5 HASHTAGS FOR SOCIAL SHARING:\n"
+            "Mix of industry topics and specific terms"
+        )
+    )
 
-
-def PostGenerator(request_data: dict):  # Add the parameter here
+def PostGenerator(request_data: dict):  
       # Sanitize the keys by removing problematic characters
     sanitized_data = {}
     for key, value in request_data.items():
@@ -183,6 +239,110 @@ def PostGenerator(request_data: dict):  # Add the parameter here
         "hashtags": completion.hashtags,
     }
 
+def BlogPostGenerator(request_data: dict):
+    # Sanitize the keys
+    sanitized_data = {}
+    for key, value in request_data.items():
+        new_key = key.replace("'", "").replace('"', "").replace("`", "")
+        sanitized_data[new_key] = value
+
+    system_content = f'''
+        You are an expert content strategist and SEO specialist who helps convert spoken-word transcripts into 
+        professional, optimized blog posts. Your goal is to create long-form content that ranks well in search engines
+        while maintaining natural readability and thought leadership.
+
+        <Context>
+            <company_name>
+            Company Name: {sanitized_data.get("6.Name", "")}
+            </company_name>
+
+            <company_description>
+            Company Description: {sanitized_data.get("6.Company Description", "")}
+            </company_description>
+
+            <creator_name>
+            Creator Name: {sanitized_data.get("11.Full Name", "")}
+            </creator_name>
+
+            <creator_bio>
+            Creator Bio: {sanitized_data.get("11.Bio", "")}
+            </creator_bio>
+
+            <style_guide>
+            Long Form Style Guide: {sanitized_data.get("7.Long Form Writing Style Guide", "")}
+            </style_guide>
+
+            <optional_context>
+            Brand Values: {sanitized_data.get("7.Brand Values", "")}
+            Tone Guidelines: {sanitized_data.get("7.Tone of Voice Principles", "")}
+            Audience: {sanitized_data.get("14.array", "")}
+            Solutions: {sanitized_data.get("13.array", "")}
+            </optional_context>
+        </context>
+
+        <examples>
+        <example1>
+        {sanitized_data.get("11.Long Form Text Sample 1", "")}
+        </example1>
+        <example2>
+        {sanitized_data.get("11.Long Form Text Sample 2", "")}
+        </example2>
+        <example3>
+        {sanitized_data.get("11.Long Form Text Sample 3", "")}
+        </example3>
+        </examples>
+    '''
+
+    user_content = f'''
+        Create an SEO-optimized blog post from this transcript and topic:
+
+        <ai_transcript>
+        {sanitized_data.get("2.AI Transcript Rough", "")}
+        </ai_transcript>
+
+        <topic>
+        {sanitized_data.get("12.Topic Name", "")}
+        </topic>
+
+        Follow these structural requirements:
+        - Start with SEO frontmatter section
+        - Use proper heading hierarchy (H1 > H2 > H3)
+        - Include at least one bulleted list
+        - Keep paragraphs under 5 lines
+        - Use transitional phrases between sections
+        - Include natural keyword placement
+        - Add 3-5 relevant hashtags at end
+    '''
+
+    messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_content}
+    ]
+
+    llm = LLMFactory("openai")
+    completion = llm.create_completion(response_model=BlogPost, messages=messages)
+
+    return {
+        "title": completion.title,
+        "contentBody": completion.contentBody,
+        "hashtags": completion.hashtags,
+    }
+    
+    
+@app.route('/generate_blog', methods=['POST'])
+def generate_blog():
+    try:
+        # Input validation
+        required_fields = ["2.AI Transcript Rough", "12.Topic Name"]
+        for field in required_fields:
+            if field not in request.json:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        result = BlogPostGenerator(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error generating blog post: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/generate_post', methods=['POST'])
 def generate_post():
