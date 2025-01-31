@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 import json
 import logging
 import os
+import re
+
 
 
 
@@ -41,8 +43,6 @@ class LLMFactory:
             "messages": messages,
         }
         return self.client.chat.completions.create(**completion_params)
-
-
 
 
 class SocialMediaPost(BaseModel):
@@ -148,12 +148,28 @@ class BlogPost(BaseModel):
         )
     )
 
-def PostGenerator(request_data: dict):  
-      # Sanitize the keys by removing problematic characters
+def sanitize_json(json_data):
+    """Cleans keys and values in JSON by removing problematic characters."""
     sanitized_data = {}
-    for key, value in request_data.items():
-        new_key = key.replace("'", "").replace('"', "")
+
+    for key, value in json_data.items():
+        # Sanitize key (remove quotes and backticks)
+        new_key = key.replace("'", "").replace('"', "").replace("`", "")
+
+        # Sanitize value if it's a string
+        if isinstance(value, str):
+            value = re.sub(r'[\n\r\t]', ' ', value)  # Replace newlines/tabs with spaces
+            value = value.replace('"', "'")  # Replace double quotes with single
+            value = re.sub(r'[^\x20-\x7E]', '', value)  # Remove non-printable special characters
+            value = value.strip()  # Remove leading/trailing spaces
+
         sanitized_data[new_key] = value
+
+    return sanitized_data
+
+def PostGenerator(request_data: dict):  
+     # Sanitize entire request data (keys + values)
+    sanitized_data = sanitize_json(request_data)
 
     system_content = f'''
         You are an expert senior copywriter and social media marketer who helps business leaders and subject matter experts convert their spoken words into polished, 
@@ -240,11 +256,8 @@ def PostGenerator(request_data: dict):
     }
 
 def BlogPostGenerator(request_data: dict):
-    # Sanitize the keys
-    sanitized_data = {}
-    for key, value in request_data.items():
-        new_key = key.replace("'", "").replace('"', "").replace("`", "")
-        sanitized_data[new_key] = value
+     # Sanitize entire request data (keys + values)
+    sanitized_data = sanitize_json(request_data)
 
     system_content = f'''
         You are an expert content strategist and SEO specialist who helps convert spoken-word transcripts into 
@@ -332,14 +345,35 @@ def BlogPostGenerator(request_data: dict):
 @app.route('/generate_blog', methods=['POST'])
 def generate_blog():
     try:
-        # Input validation
+        # Ensure request is JSON
+        if not request.is_json:
+            return jsonify({"error": "Invalid JSON format"}), 400
+
+        raw_data = request.get_json()
+        if not isinstance(raw_data, dict):
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        # Log raw request data for debugging
+        logging.info(f"Raw Request Data:\n{json.dumps(raw_data, indent=2)}")
+
+        # Sanitize the data
+        cleaned_data = sanitize_json(raw_data)
+
+        # Log sanitized data
+        logging.info(f"Sanitized Data:\n{json.dumps(cleaned_data, indent=2)}")
+
+        # Required field validation
         required_fields = ["2.AI Transcript Rough", "12.Topic Name"]
         for field in required_fields:
-            if field not in request.json:
+            if field not in cleaned_data:
                 return jsonify({"error": f"Missing required field: {field}"}), 400
 
-        result = BlogPostGenerator(request.json)
+        result = BlogPostGenerator(cleaned_data)
         return jsonify(result)
+
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON Decoding Error: {str(e)}")
+        return jsonify({"error": "Malformed JSON"}), 400
     except Exception as e:
         logging.error(f"Error generating blog post: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
@@ -347,19 +381,34 @@ def generate_blog():
 @app.route('/generate_post', methods=['POST'])
 def generate_post():
     try:
-        # Print the request data
-        print("Request Headers:")
-        print(json.dumps(dict(request.headers), indent=2))
-        
-        print("\nRequest Body:")
-        print(json.dumps(request.json, indent=2))
+        # Ensure request is JSON
+        if not request.is_json:
+            return jsonify({"error": "Invalid JSON format"}), 400
 
-        # Call the PostGenerator function with the request data
-        result = PostGenerator(request.json)
+        raw_data = request.get_json()
+        if not isinstance(raw_data, dict):
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        # Log raw request data for debugging
+        logging.info(f"Raw Request Data:\n{json.dumps(raw_data, indent=2)}")
+
+        # Sanitize the data
+        cleaned_data = sanitize_json(raw_data)
+
+        # Log sanitized data
+        logging.info(f"Sanitized Data:\n{json.dumps(cleaned_data, indent=2)}")
+
+        # Call the PostGenerator function with sanitized data
+        result = PostGenerator(cleaned_data)
         return jsonify(result)
+
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON Decoding Error: {str(e)}")
+        return jsonify({"error": "Malformed JSON"}), 400
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Error generating social media post: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
