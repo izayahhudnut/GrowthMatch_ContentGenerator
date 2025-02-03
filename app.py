@@ -9,10 +9,6 @@ import logging
 import os
 import re
 
-
-
-
-
 app = Flask(__name__)
 
 class LLMFactory:
@@ -43,7 +39,6 @@ class LLMFactory:
             "messages": messages,
         }
         return self.client.chat.completions.create(**completion_params)
-
 
 class SocialMediaPost(BaseModel):
     """Social media post generated from AI transcript and topic"""
@@ -159,8 +154,9 @@ def sanitize_json(json_data):
         # Sanitize value if it's a string
         if isinstance(value, str):
             value = re.sub(r'[\n\r\t]', ' ', value)  # Replace newlines/tabs with spaces
-            value = value.replace('"', "'")  # Replace double quotes with single
             value = re.sub(r'[^\x20-\x7E]', '', value)  # Remove non-printable special characters
+            value = value.replace('\\', '\\\\')  # Escape backslashes
+            value = value.replace('"', '\\"')  # Escape double quotes
             value = value.strip()  # Remove leading/trailing spaces
 
         sanitized_data[new_key] = value
@@ -340,8 +336,7 @@ def BlogPostGenerator(request_data: dict):
         "contentBody": completion.contentBody,
         "hashtags": completion.hashtags,
     }
-    
-    
+ 
 @app.route('/generate_blog', methods=['POST'])
 def generate_blog():
     try:
@@ -349,18 +344,18 @@ def generate_blog():
         if not request.is_json:
             return jsonify({"error": "Invalid JSON format"}), 400
 
-        raw_data = request.get_json()
+        raw_data = request.get_json(force=True)  # Use force=True to handle potential parsing issues
         if not isinstance(raw_data, dict):
             return jsonify({"error": "Invalid JSON payload"}), 400
 
         # Log raw request data for debugging
-        logging.info(f"Raw Request Data:\n{json.dumps(raw_data, indent=2)}")
+        logging.info(f"Raw Request Data:\n{json.dumps(raw_data, indent=2, ensure_ascii=False)}")
 
         # Sanitize the data
         cleaned_data = sanitize_json(raw_data)
 
         # Log sanitized data
-        logging.info(f"Sanitized Data:\n{json.dumps(cleaned_data, indent=2)}")
+        logging.info(f"Sanitized Data:\n{json.dumps(cleaned_data, indent=2, ensure_ascii=False)}")
 
         # Required field validation
         required_fields = ["2.AI Transcript Rough", "12.Topic Name"]
@@ -408,7 +403,6 @@ def generate_post():
     except Exception as e:
         logging.error(f"Error generating social media post: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
-
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
